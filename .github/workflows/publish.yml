@@ -1,0 +1,43 @@
+name: Publish Fedora 45 chunker
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: podman build --pull=always --tag ghcr.io/mdev-linux/custom-bootc:${{ github.sha }} .
+
+      - name: Verify installed RPM and chunker command
+        run: |
+          podman run --rm --entrypoint /bin/sh ghcr.io/mdev-linux/custom-bootc:${{ github.sha }} -c '
+            set -eu
+            rpm -q rpm-ostree rpm-ostree-libs
+            sha256sum /usr/bin/rpm-ostree
+            /usr/bin/rpm-ostree compose build-chunked-oci --help >/dev/null
+          '
+
+      - name: Publish to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          printf '%s' "$GHCR_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          podman push --digestfile image-digest.txt ghcr.io/mdev-linux/custom-bootc:${{ github.sha }}
+          echo "Published ghcr.io/mdev-linux/custom-bootc@$(cat image-digest.txt)"
+
+      - name: Save image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest
+          path: image-digest.txt
